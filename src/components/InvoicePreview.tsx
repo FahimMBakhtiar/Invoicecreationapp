@@ -1,3 +1,4 @@
+import { useRef, useState } from 'react';
 import { Invoice } from '../App';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
@@ -16,6 +17,9 @@ function formatCurrency(amount: number): string {
 }
 
 export function InvoicePreview({ invoice, onEdit }: InvoicePreviewProps) {
+  const invoiceRef = useRef<HTMLDivElement>(null);
+  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+  
   const subtotal = invoice.lineItems.reduce((sum, item) => sum + (item.quantity * item.unitCost), 0);
   const tax = subtotal * (invoice.taxRate / 100);
   const totalBeforeDiscount = subtotal + tax;
@@ -26,15 +30,147 @@ export function InvoicePreview({ invoice, onEdit }: InvoicePreviewProps) {
     window.print();
   };
 
-  const handleDownload = () => {
-    // In a real application, this would generate a PDF
-    alert('PDF download functionality would be implemented here');
+  const handleDownload = async () => {
+    if (!invoiceRef.current) {
+      alert('Invoice element not found');
+      return;
+    }
+
+    setIsGeneratingPDF(true);
+    
+    try {
+      // Clone the invoice element and hide buttons
+      const clone = invoiceRef.current.cloneNode(true) as HTMLElement;
+      const buttons = clone.querySelectorAll('button');
+      buttons.forEach((btn) => {
+        (btn as HTMLElement).style.display = 'none';
+      });
+
+      // Convert images to data URIs
+      const images = clone.querySelectorAll('img');
+      await Promise.all(
+        Array.from(images).map(async (img) => {
+          const htmlImg = img as HTMLImageElement;
+          try {
+            if (htmlImg.src && !htmlImg.src.startsWith('data:')) {
+              const response = await fetch(htmlImg.src);
+              const blob = await response.blob();
+              const reader = new FileReader();
+              const dataUrl = await new Promise<string>((resolve, reject) => {
+                reader.onload = () => resolve(reader.result as string);
+                reader.onerror = reject;
+                reader.readAsDataURL(blob);
+              });
+              htmlImg.src = dataUrl;
+            }
+          } catch (e) {
+            console.warn('Failed to convert image to data URI:', e);
+          }
+        })
+      );
+
+      // Get all stylesheets
+      const stylesheets = Array.from(document.styleSheets);
+      let styles = '';
+      
+      stylesheets.forEach((sheet) => {
+        try {
+          const rules = Array.from(sheet.cssRules || []);
+          rules.forEach((rule) => {
+            styles += rule.cssText + '\n';
+          });
+        } catch (e) {
+          // Cross-origin stylesheets may throw errors, ignore them
+        }
+      });
+
+      // Create complete HTML document
+      const htmlContent = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="UTF-8">
+            <style>${styles}</style>
+          </head>
+          <body>
+            ${clone.outerHTML}
+          </body>
+        </html>
+      `;
+
+      // Determine API endpoint based on environment
+      const apiUrl = import.meta.env.PROD 
+        ? '/api/generate-pdf'  // Production: use relative path (Vercel/Netlify)
+        : 'http://localhost:3001/api/generate-pdf';  // Development: use local server
+
+      // Send to Puppeteer server
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          html: htmlContent,
+          filename: `Invoice-${invoice.invoiceNumber}.pdf`,
+        }),
+      });
+
+      if (!response.ok) {
+        // Try to get error message
+        let errorMessage = 'Failed to generate PDF';
+        try {
+          const error = await response.json();
+          errorMessage = error.error || error.details || errorMessage;
+        } catch (e) {
+          errorMessage = `Server error: ${response.status} ${response.statusText}`;
+        }
+        throw new Error(errorMessage);
+      }
+
+      // Verify content type
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/pdf')) {
+        console.warn('Unexpected content type:', contentType);
+        // Continue anyway, might still be a PDF
+      }
+
+      // Get PDF blob and download
+      const blob = await response.blob();
+      
+      // Verify blob is not empty
+      if (blob.size === 0) {
+        throw new Error('PDF file is empty');
+      }
+
+      // Verify it's actually a PDF by checking the first bytes
+      const arrayBuffer = await blob.arrayBuffer();
+      const uint8Array = new Uint8Array(arrayBuffer);
+      const pdfHeader = String.fromCharCode(...uint8Array.slice(0, 4));
+      if (pdfHeader !== '%PDF') {
+        throw new Error('Invalid PDF file format');
+      }
+
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Invoice-${invoice.invoiceNumber}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+      alert(`Failed to generate PDF: ${error instanceof Error ? error.message : 'Unknown error'}. Make sure the PDF server is running on port 3001.`);
+    } finally {
+      setIsGeneratingPDF(false);
+    }
   };
 
   return (
     <Card className="print:shadow-none print:border-0">
-      {/* Header with Logo */}
-      <div className="bg-gradient-to-r from-[#1A5872] to-[#0D2F3F] p-8 print:p-6">
+      <div ref={invoiceRef}>
+        {/* Header with Logo */}
+        <div className="bg-gradient-to-r from-[#1A5872] to-[#0D2F3F] p-8 print:p-6">
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-4">
             <div className="bg-white p-2 rounded-lg">
@@ -54,9 +190,15 @@ export function InvoicePreview({ invoice, onEdit }: InvoicePreviewProps) {
               <Printer className="w-4 h-4" />
               Print
             </Button>
-            <Button variant="secondary" size="sm" onClick={handleDownload} className="gap-2">
+            <Button 
+              variant="secondary" 
+              size="sm" 
+              onClick={handleDownload} 
+              className="gap-2"
+              disabled={isGeneratingPDF}
+            >
               <Download className="w-4 h-4" />
-              Download
+              {isGeneratingPDF ? 'Generating...' : 'Download'}
             </Button>
           </div>
         </div>
@@ -217,6 +359,7 @@ export function InvoicePreview({ invoice, onEdit }: InvoicePreviewProps) {
             </a>
           </div>
         </div>
+      </div>
       </div>
     </Card>
   );
