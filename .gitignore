@@ -35,5 +35,6 @@ frontend/build
 frontend/dist
 *.tsbuildinfo
 
-# Frontend node_modules (if using monorepo structure)
+# Node modules - only frontend has dependencies
+# Root node_modules is not needed (no package.json in root)
 frontend/node_modules
