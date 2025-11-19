@@ -1,77 +1,138 @@
 import { useState, useEffect } from 'react';
-import { Invoice, LineItem } from '../App';
+import { Invoice, LineItem } from '../types/invoice.types';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
 import { Card } from './ui/card';
-import { Plus, Trash2 } from 'lucide-react';
+import { Plus, Trash2, Loader2 } from 'lucide-react';
 
 interface InvoiceFormProps {
   invoice: Invoice | null;
   onSave: (invoice: Invoice) => void;
   onCancel: () => void;
-  generateInvoiceNumber: () => string;
+  generateInvoiceNumber: () => Promise<string>;
 }
 
 export function InvoiceForm({ invoice, onSave, onCancel, generateInvoiceNumber }: InvoiceFormProps) {
-  const [formData, setFormData] = useState<Invoice>(() => {
-    if (invoice) return invoice;
-    
-    return {
-      id: crypto.randomUUID(),
-      invoiceNumber: generateInvoiceNumber(),
-      date: new Date().toISOString().split('T')[0],
-      dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-      businessName: 'Anything2BD',
-      businessEmail: 'anything2bd@gmail.com',
-      businessPhone: '',
-      businessAddress: '',
-      customerName: '',
-      customerEmail: '',
-      customerAddress: '',
-      lineItems: [
-        { id: crypto.randomUUID(), itemName: '', description: '', size: '', quantity: 1, unitCost: 0 }
-      ],
-      notes: '',
-      taxRate: 0,
-      discount: 0,
-      advancePaid: 0,
+  const [formData, setFormData] = useState<Invoice | null>(null);
+  const [isLoadingInvoiceNumber, setIsLoadingInvoiceNumber] = useState(false);
+
+  useEffect(() => {
+    const initializeForm = async () => {
+      if (invoice) {
+        setFormData(invoice);
+      } else {
+        setIsLoadingInvoiceNumber(true);
+        try {
+          const invoiceNumber = await generateInvoiceNumber();
+          setFormData({
+            id: crypto.randomUUID(),
+            invoiceNumber,
+            date: new Date().toISOString().split('T')[0],
+            dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+            businessName: 'Anything2BD',
+            businessEmail: 'anything2bd@gmail.com',
+            businessPhone: '',
+            businessAddress: '',
+            customerName: '',
+            customerEmail: '',
+            customerAddress: '',
+            lineItems: [
+              { id: crypto.randomUUID(), itemName: '', description: '', size: '', quantity: 1, unitCost: 0 }
+            ],
+            notes: '',
+            taxRate: 0,
+            discount: 0,
+            advancePaid: 0,
+          });
+        } catch (error) {
+          console.error('Failed to generate invoice number:', error);
+          // Fallback invoice number
+          const today = new Date();
+          const datePrefix = today.toISOString().slice(0, 10).replace(/-/g, '');
+          setFormData({
+            id: crypto.randomUUID(),
+            invoiceNumber: `${datePrefix}001`,
+            date: new Date().toISOString().split('T')[0],
+            dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+            businessName: 'Anything2BD',
+            businessEmail: 'anything2bd@gmail.com',
+            businessPhone: '',
+            businessAddress: '',
+            customerName: '',
+            customerEmail: '',
+            customerAddress: '',
+            lineItems: [
+              { id: crypto.randomUUID(), itemName: '', description: '', size: '', quantity: 1, unitCost: 0 }
+            ],
+            notes: '',
+            taxRate: 0,
+            discount: 0,
+            advancePaid: 0,
+          });
+        } finally {
+          setIsLoadingInvoiceNumber(false);
+        }
+      }
     };
-  });
+
+    initializeForm();
+  }, [invoice, generateInvoiceNumber]);
+
+  if (!formData || isLoadingInvoiceNumber) {
+    return (
+      <Card className="p-6">
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="w-8 h-8 animate-spin text-[#1A5872]" />
+        </div>
+      </Card>
+    );
+  }
 
   const handleInputChange = (field: keyof Invoice, value: string | number) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
+    setFormData(prev => prev ? ({ ...prev, [field]: value }) : null);
   };
 
   const handleLineItemChange = (id: string, field: keyof LineItem, value: string | number) => {
-    setFormData(prev => ({
-      ...prev,
-      lineItems: prev.lineItems.map(item =>
-        item.id === id ? { ...item, [field]: value } : item
-      ),
-    }));
+    setFormData(prev => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        lineItems: prev.lineItems.map(item =>
+          item.id === id ? { ...item, [field]: value } : item
+        ),
+      };
+    });
   };
 
   const addLineItem = () => {
-    setFormData(prev => ({
-      ...prev,
-      lineItems: [...prev.lineItems, { id: crypto.randomUUID(), itemName: '', description: '', size: '', quantity: 1, unitCost: 0 }],
-    }));
+    setFormData(prev => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        lineItems: [...prev.lineItems, { id: crypto.randomUUID(), itemName: '', description: '', size: '', quantity: 1, unitCost: 0 }],
+      };
+    });
   };
 
   const removeLineItem = (id: string) => {
-    if (formData.lineItems.length > 1) {
-      setFormData(prev => ({
-        ...prev,
-        lineItems: prev.lineItems.filter(item => item.id !== id),
-      }));
+    if (formData && formData.lineItems.length > 1) {
+      setFormData(prev => {
+        if (!prev) return null;
+        return {
+          ...prev,
+          lineItems: prev.lineItems.filter(item => item.id !== id),
+        };
+      });
     }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSave(formData);
+    if (formData) {
+      onSave(formData);
+    }
   };
 
   return (

@@ -1,4 +1,4 @@
-import { Invoice } from '../App';
+import { Invoice } from '../types/invoice.types';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
 import { Separator } from './ui/separator';

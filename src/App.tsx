@@ -1,77 +1,110 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { InvoiceForm } from './components/InvoiceForm';
 import { InvoicePreview } from './components/InvoicePreview';
+import { Login } from './components/Login';
 import { Button } from './components/ui/button';
-import { FileText, Plus } from 'lucide-react';
+import { FileText, Plus, LogOut, Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
 import atobLogo from 'figma:asset/c1a850e885b460d6ebe9f5090d5abbb6b2c2cd14.png';
-
-export interface LineItem {
-  id: string;
-  itemName: string;
-  description: string;
-  size: string;
-  quantity: number;
-  unitCost: number;
-}
-
-export interface Invoice {
-  id: string;
-  invoiceNumber: string;
-  date: string;
-  dueDate: string;
-  businessName: string;
-  businessEmail: string;
-  businessPhone: string;
-  businessAddress: string;
-  customerName: string;
-  customerEmail: string;
-  customerAddress: string;
-  lineItems: LineItem[];
-  notes: string;
-  taxRate: number;
-  discount: number;
-  advancePaid: number;
-}
-
-// Generate invoice number in format: YYYYMMDD001
-function generateInvoiceNumber(existingInvoices: Invoice[]): string {
-  const today = new Date();
-  const datePrefix = today.toISOString().slice(0, 10).replace(/-/g, ''); // YYYYMMDD
-  
-  // Find all invoices with today's date prefix
-  const todaysInvoices = existingInvoices.filter(inv => 
-    inv.invoiceNumber.startsWith(datePrefix)
-  );
-  
-  // Get the highest sequence number for today
-  const sequenceNumbers = todaysInvoices.map(inv => {
-    const seqStr = inv.invoiceNumber.slice(8); // Get last 3 digits
-    return parseInt(seqStr) || 0;
-  });
-  
-  const nextSequence = Math.max(0, ...sequenceNumbers) + 1;
-  const sequenceStr = nextSequence.toString().padStart(3, '0');
-  
-  return `${datePrefix}${sequenceStr}`;
-}
+import { Invoice } from './types/invoice.types';
+import { InvoiceService } from '../backend/services/invoice.service';
+import { AuthService } from '../backend/services/auth.service';
 
 export default function App() {
-  const [invoices, setInvoices] = useState<Invoice[]>(() => {
-    const saved = localStorage.getItem('invoices');
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [currentInvoice, setCurrentInvoice] = useState<Invoice | null>(null);
   const [isEditing, setIsEditing] = useState(false);
+  const [isLoadingInvoices, setIsLoadingInvoices] = useState(false);
 
-  const handleSaveInvoice = (invoice: Invoice) => {
-    const updatedInvoices = invoices.some(inv => inv.id === invoice.id)
-      ? invoices.map(inv => inv.id === invoice.id ? invoice : inv)
-      : [...invoices, invoice];
-    
-    setInvoices(updatedInvoices);
-    localStorage.setItem('invoices', JSON.stringify(updatedInvoices));
-    setCurrentInvoice(invoice);
-    setIsEditing(false);
+  // Check authentication status on mount
+  useEffect(() => {
+    checkAuth();
+  }, []);
+
+  // Load invoices when authenticated
+  useEffect(() => {
+    if (isAuthenticated) {
+      loadInvoices();
+    }
+  }, [isAuthenticated]);
+
+  const checkAuth = async () => {
+    try {
+      const { success, session } = await AuthService.getSession();
+      setIsAuthenticated(!!session);
+    } catch (error) {
+      console.error('Auth check error:', error);
+      setIsAuthenticated(false);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const loadInvoices = async () => {
+    setIsLoadingInvoices(true);
+    try {
+      const result = await InvoiceService.getAllInvoices();
+      if (result.success && result.data) {
+        setInvoices(result.data);
+      } else {
+        toast.error(result.error || 'Failed to load invoices');
+      }
+    } catch (error) {
+      console.error('Load invoices error:', error);
+      toast.error('Failed to load invoices');
+    } finally {
+      setIsLoadingInvoices(false);
+    }
+  };
+
+  const handleLoginSuccess = () => {
+    setIsAuthenticated(true);
+    toast.success('Successfully signed in');
+  };
+
+  const handleLogout = async () => {
+    try {
+      const result = await AuthService.signOut();
+      if (result.success) {
+        setIsAuthenticated(false);
+        setInvoices([]);
+        setCurrentInvoice(null);
+        setIsEditing(false);
+        toast.success('Successfully signed out');
+      } else {
+        toast.error(result.error || 'Failed to sign out');
+      }
+    } catch (error) {
+      console.error('Logout error:', error);
+      toast.error('Failed to sign out');
+    }
+  };
+
+  const handleSaveInvoice = async (invoice: Invoice) => {
+    try {
+      let result;
+      if (invoice.id) {
+        // Update existing invoice
+        result = await InvoiceService.updateInvoice(invoice);
+      } else {
+        // Create new invoice
+        result = await InvoiceService.createInvoice(invoice);
+      }
+
+      if (result.success && result.data) {
+        toast.success(`Invoice ${invoice.id ? 'updated' : 'created'} successfully`);
+        await loadInvoices();
+        setCurrentInvoice(result.data);
+        setIsEditing(false);
+      } else {
+        toast.error(result.error || `Failed to ${invoice.id ? 'update' : 'create'} invoice`);
+      }
+    } catch (error) {
+      console.error('Save invoice error:', error);
+      toast.error('Failed to save invoice');
+    }
   };
 
   const handleNewInvoice = () => {
@@ -83,15 +116,55 @@ export default function App() {
     setIsEditing(true);
   };
 
-  const handleDeleteInvoice = (id: string) => {
-    const updatedInvoices = invoices.filter(inv => inv.id !== id);
-    setInvoices(updatedInvoices);
-    localStorage.setItem('invoices', JSON.stringify(updatedInvoices));
-    if (currentInvoice?.id === id) {
-      setCurrentInvoice(null);
-      setIsEditing(false);
+  const handleDeleteInvoice = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this invoice?')) {
+      return;
+    }
+
+    try {
+      const result = await InvoiceService.deleteInvoice(id);
+      if (result.success) {
+        toast.success('Invoice deleted successfully');
+        await loadInvoices();
+        if (currentInvoice?.id === id) {
+          setCurrentInvoice(null);
+          setIsEditing(false);
+        }
+      } else {
+        toast.error(result.error || 'Failed to delete invoice');
+      }
+    } catch (error) {
+      console.error('Delete invoice error:', error);
+      toast.error('Failed to delete invoice');
     }
   };
+
+  const generateInvoiceNumber = async (): Promise<string> => {
+    const result = await InvoiceService.generateInvoiceNumber();
+    if (result.success && result.invoiceNumber) {
+      return result.invoiceNumber;
+    }
+    // Fallback to client-side generation if backend fails
+    const today = new Date();
+    const datePrefix = today.toISOString().slice(0, 10).replace(/-/g, '');
+    const existingToday = invoices.filter(inv => inv.invoiceNumber.startsWith(datePrefix));
+    const nextSeq = existingToday.length + 1;
+    return `${datePrefix}${nextSeq.toString().padStart(3, '0')}`;
+  };
+
+  // Show loading state
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-[#1A5872]" />
+      </div>
+    );
+  }
+
+  // Show login if not authenticated
+  if (!isAuthenticated) {
+    return <Login onLoginSuccess={handleLoginSuccess} />;
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
@@ -106,17 +179,32 @@ export default function App() {
               <p className="text-slate-600">Create and manage your business invoices</p>
             </div>
           </div>
-          <Button onClick={handleNewInvoice} className="gap-2 bg-[#1A5872] hover:bg-[#143F52]">
-            <Plus className="w-4 h-4" />
-            New Invoice
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button onClick={handleNewInvoice} className="gap-2 bg-[#1A5872] hover:bg-[#143F52]">
+              <Plus className="w-4 h-4" />
+              New Invoice
+            </Button>
+            <Button 
+              onClick={handleLogout} 
+              variant="outline" 
+              className="gap-2"
+              title="Sign out"
+            >
+              <LogOut className="w-4 h-4" />
+              Sign Out
+            </Button>
+          </div>
         </div>
 
         <div className="grid lg:grid-cols-3 gap-6">
           <div className="lg:col-span-1 space-y-4">
             <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-4">
               <h2 className="mb-4">Saved Invoices</h2>
-              {invoices.length === 0 ? (
+              {isLoadingInvoices ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="w-6 h-6 animate-spin text-[#1A5872]" />
+                </div>
+              ) : invoices.length === 0 ? (
                 <p className="text-slate-500 text-center py-8">No invoices yet. Create your first one!</p>
               ) : (
                 <div className="space-y-2">
@@ -137,7 +225,7 @@ export default function App() {
                         <div>
                           <p className="text-slate-900">#{invoice.invoiceNumber}</p>
                           <p className="text-slate-600 text-sm">{invoice.customerName}</p>
-                          <p className="text-slate-500 text-sm">{invoice.date}</p>
+                          <p className="text-slate-500 text-sm">{new Date(invoice.date).toLocaleDateString()}</p>
                         </div>
                         <Button
                           variant="ghost"
@@ -163,7 +251,7 @@ export default function App() {
                 invoice={currentInvoice}
                 onSave={handleSaveInvoice}
                 onCancel={() => setIsEditing(false)}
-                generateInvoiceNumber={() => generateInvoiceNumber(invoices)}
+                generateInvoiceNumber={generateInvoiceNumber}
               />
             ) : currentInvoice ? (
               <InvoicePreview
@@ -188,4 +276,4 @@ export default function App() {
   );
 }
 
-export { generateInvoiceNumber, atobLogo };
+export { atobLogo };
