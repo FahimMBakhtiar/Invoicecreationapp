@@ -7,8 +7,8 @@ import { FileText, Plus, LogOut, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import atobLogo from 'figma:asset/c1a850e885b460d6ebe9f5090d5abbb6b2c2cd14.png';
 import { Invoice } from './types/invoice.types';
-import { InvoiceService } from '../backend/services/invoice.service';
-import { AuthService } from '../backend/services/auth.service';
+import { InvoiceService } from '@backend/services/invoice.service';
+import { AuthService } from '@backend/services/auth.service';
 
 export default function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);

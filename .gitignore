@@ -30,4 +30,10 @@ dist-ssr
 
 # Build output
 build
+dist
+frontend/build
+frontend/dist
 *.tsbuildinfo
+
+# Frontend node_modules (if using monorepo structure)
+frontend/node_modules

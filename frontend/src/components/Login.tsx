@@ -4,7 +4,7 @@ import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Card } from './ui/card';
 import { FileText, Loader2 } from 'lucide-react';
-import { AuthService } from '../../backend/services/auth.service';
+import { AuthService } from '@backend/services/auth.service';
 
 interface LoginProps {
   onLoginSuccess: () => void;
